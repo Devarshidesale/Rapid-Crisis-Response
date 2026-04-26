@@ -1,0 +1,10 @@
+{
+  "name": "Kitchen Fire Scenario",
+  "propertyId": "hotel-a",
+  "steps": [
+    {"delay_seconds": 0,  "type": "IOT_SMOKE",    "zone": "kitchen", "floor": 1, "room": "kitchen", "raw_confidence": 0.4},
+    {"delay_seconds": 5,  "type": "VISION_CROWD",  "zone": "lobby",   "floor": 1, "room": "lobby",   "raw_confidence": 0.6},
+    {"delay_seconds": 5,  "type": "GUEST_SOS",     "zone": "lobby",   "floor": 1, "room": "room201", "raw_confidence": 1.0},
+    {"delay_seconds": 5,  "type": "VISION_FALL",   "zone": "lobby",   "floor": 1, "room": "lobby",   "raw_confidence": 0.9}
+  ]
+}
