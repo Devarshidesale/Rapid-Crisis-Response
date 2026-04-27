@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useIncidentStream } from '../hooks/useIncidentStream';
 import ConfidenceGauge from '../components/ConfidenceGauge';
 import ActionPanel from '../components/ActionPanel';
@@ -6,30 +6,53 @@ import BuildingMap from '../components/BuildingMap';
 import MissingPersonsBoard from '../components/MissingPersonsBoard';
 import CCTVFeed from '../components/CCTVFeed';
 import SensorPanel from '../components/SensorPanel';
+import HeroCanvas from '../components/HeroCanvas';
+import './FireNet.css';
 
 export default function OperatorDashboard() {
   const { incidents, activeIncident } = useIncidentStream("hotel-a");
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
-  
+
   const [evacPath, setEvacPath] = useState([]);
   const [loadingDemo, setLoadingDemo] = useState(null);
   const [auditLog, setAuditLog] = useState([]);
+  const [navScrolled, setNavScrolled] = useState(false);
+  const dashRef = useRef(null);
+  const cardRefs = useRef([]);
 
-  // Fetch evacuation path whenever the active incident changes
+  // Scroll detection for nav
+  useEffect(() => {
+    const onScroll = () => setNavScrolled(window.scrollY > 40);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // IntersectionObserver for card animations
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry, idx) => {
+        if (entry.isIntersecting) {
+          setTimeout(() => entry.target.classList.add('visible'), idx * 80);
+        }
+      });
+    }, { threshold: 0.1 });
+
+    cardRefs.current.forEach(el => { if (el) observer.observe(el); });
+    return () => observer.disconnect();
+  }, []);
+
+  // Fetch evacuation path
   useEffect(() => {
     if (activeIncident?.id) {
       fetch(`${backendUrl}/building/evacpath/${activeIncident.id}/room101`)
         .then(res => res.json())
-        .then(data => {
-          if (data && data.path) setEvacPath(data.path);
-        })
+        .then(data => { if (data?.path) setEvacPath(data.path); })
         .catch(err => console.error("Evac path fetch error:", err));
     } else {
       setEvacPath([]);
     }
   }, [activeIncident?.id, backendUrl]);
 
-  // Add to audit log
   const addLog = (msg) => {
     setAuditLog(prev => [
       { time: new Date().toLocaleTimeString(), text: msg },
@@ -37,23 +60,19 @@ export default function OperatorDashboard() {
     ]);
   };
 
-  // Demo signal sender
   const triggerSignal = async (buttonId, payload, isP1 = false) => {
     setLoadingDemo(buttonId);
     addLog(`Signal sent: ${payload.type} from ${payload.zone}`);
     try {
-      const res = await fetch(`${backendUrl}/signal/ingest`, {
+      await fetch(`${backendUrl}/signal/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
       addLog(`VCS updated → Signal accepted`);
-
       if (isP1) {
         addLog('⏳ Waiting 2s for VCS threshold...');
         await new Promise(r => setTimeout(r, 2000));
-        // Send additional signal to cross threshold
         await fetch(`${backendUrl}/signal/ingest`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -67,7 +86,6 @@ export default function OperatorDashboard() {
     setLoadingDemo(null);
   };
 
-  // CCTV detection handler
   const handleCCTVDetection = (type, confidence) => {
     addLog(`🎥 AI Vision detected: ${type} (${(confidence * 100).toFixed(0)}%)`);
     triggerSignal('cctv', {
@@ -77,273 +95,216 @@ export default function OperatorDashboard() {
   };
 
   const uiColor = activeIncident?.uiColor || 'BLUE';
-  const colorMap = { BLUE: '#3b82f6', AMBER: '#f59e0b', RED: '#ef4444' };
-  const statusTextMap = { BLUE: 'All Clear', AMBER: 'Verifying', RED: 'P1 ACTIVE' };
+
+  const setCardRef = (idx) => (el) => { cardRefs.current[idx] = el; };
 
   return (
-    <div style={styles.dashboard}>
-      <style>{`
-        @keyframes pulse-border { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); } }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-        .demo-spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; }
-      `}</style>
+    <div style={{ background: '#080808', color: '#F0F0F0', fontFamily: "'DM Sans', sans-serif" }}>
 
-      {/* ═══ TOP HEADER ═══ */}
-      <header style={{
-        ...styles.header,
-        borderBottomColor: colorMap[uiColor],
-        animation: uiColor === 'RED' ? 'pulse-border 2s infinite' : 'none',
-      }}>
-        <div>
-          <h1 style={styles.headerTitle}>CrisisSync<span style={{ color: '#3b82f6' }}>AI</span></h1>
-          <span style={styles.headerSub}>Grand Hotel A — Nerve Center</span>
+      {/* ═══ TOP NAV ═══ */}
+      <nav className={`fn-nav ${navScrolled ? 'scrolled' : ''}`}>
+        <a className="fn-nav-brand" href="#top">rapid<span>crisis</span> response</a>
+        <ul className="fn-nav-links">
+          <li><a href="#top">Overview</a></li>
+          <li><a href="#dashboard">Units</a></li>
+          <li><a href="#dashboard">Incidents</a></li>
+          <li><a href="#dashboard">Dispatch</a></li>
+          <li><a href="#dashboard">Reports</a></li>
+        </ul>
+        <div className="fn-nav-right">
+          <button className="fn-nav-icon" title="Notifications">🔔</button>
+          <button className="fn-nav-icon" title="Settings">⚙</button>
+          <button className="fn-nav-icon" title="Profile">👤</button>
+          <button className="fn-alert-btn">ALERT CENTER</button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={styles.incidentCounter}>
-            Incidents: <strong>{incidents.length}</strong>
-          </div>
-          <div style={{ ...styles.statusPill, backgroundColor: colorMap[uiColor] }}>
-            {statusTextMap[uiColor]}
-          </div>
-        </div>
-      </header>
+      </nav>
 
-      {/* ═══ MAIN 3-COLUMN GRID ═══ */}
-      <div style={styles.mainGrid}>
-        
-        {/* LEFT COLUMN: CCTV + Sensors */}
-        <div style={styles.leftCol}>
-          <div style={styles.panel}>
+      {/* ═══ HERO SECTION ═══ */}
+      <section className="fn-hero" id="top">
+        {/* Full-viewport 3D Model */}
+        <div className="fn-hero-iframe-wrap">
+          <iframe
+            title="3D Fire Scene"
+            allowFullScreen
+            allow="autoplay; fullscreen; xr-spatial-tracking"
+            src="https://sketchfab.com/models/fefd42f4b53a433bbdc8b70bcbb6a945/embed?autostart=1&ui_controls=0&ui_infos=0&ui_watermark=0&ui_watermark_link=0&ui_ar=0&ui_help=0&ui_settings=0&ui_vr=0&ui_fullscreen=0&ui_annotations=0"
+          />
+          <div className="fn-hero-iframe-mask" />
+        </div>
+
+        {/* Particle overlay */}
+        {/* <HeroCanvas /> */}
+
+        {/* Hero Content — bottom left */}
+        <div className="fn-hero-content">
+          <div className="fn-status-pill">
+            <span className="fn-status-dot" />
+            SYSTEM ONLINE
+          </div>
+          <h1 className="fn-hero-title">
+            Crisis-Sync AI
+          </h1>
+          <p className="fn-hero-desc">
+            Experience the platform — where real-time intelligence, AI-driven response, and tactical coordination meet exceptional crisis management.
+          </p>
+          <button className="fn-hero-cta" onClick={() => document.getElementById('dashboard')?.scrollIntoView({ behavior: 'smooth' })}>
+            Enter Command Center
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Stat counters — bottom right */}
+        <div className="fn-stat-pills">
+          <div className="fn-stat-pill">
+            <div className="accent-bar" style={{ background: '#22C55E' }} />
+            <span className="val">0</span>
+            <span className="lbl">Active Units</span>
+          </div>
+          <div className="fn-stat-pill">
+            <div className="accent-bar" style={{ background: '#FF3B1F' }} />
+            <span className="val">{incidents.length > 0 ? incidents.length : 0}</span>
+            <span className="lbl">Live Incidents</span>
+          </div>
+          <div className="fn-stat-pill">
+            <div className="accent-bar" style={{ background: '#FFB020' }} />
+            <span className="val">0ms</span>
+            <span className="lbl">Avg Response</span>
+          </div>
+        </div>
+
+        {/* Scroll Cue */}
+        <div className="fn-scroll-cue">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+          <span>Scroll</span>
+        </div>
+      </section>
+
+      {/* ═══ DASHBOARD SECTION ═══ */}
+      <section className="fn-dashboard" id="dashboard" ref={dashRef}>
+        <h2 className="fn-section-title">COMMAND CENTER</h2>
+        <p className="fn-section-sub">Real-time incident monitoring & response</p>
+
+        <div className="fn-dash-grid">
+          {/* CCTV Feed */}
+          <div className="fn-card" ref={setCardRef(0)}>
+            <div className="fn-card-header">
+              <span className="fn-card-title">CCTV Feed</span>
+              <span className="fn-card-badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#22C55E' }}>LIVE</span>
+            </div>
             <CCTVFeed onDetection={handleCCTVDetection} />
           </div>
-          <div style={styles.panel}>
+
+          {/* VCS Gauge */}
+          <div className="fn-card" ref={setCardRef(1)}>
+            <div className="fn-card-header">
+              <span className="fn-card-title">VCS Confidence</span>
+              <span className="fn-card-badge" style={{
+                background: uiColor === 'RED' ? 'rgba(255,59,31,0.15)' : 'rgba(255,176,32,0.15)',
+                color: uiColor === 'RED' ? '#FF3B1F' : '#FFB020'
+              }}>
+                {uiColor}
+              </span>
+            </div>
+            <ConfidenceGauge vcs={activeIncident?.vcs || 0} uiColor={uiColor} />
+          </div>
+
+          {/* Building Map */}
+          <div className="fn-card" ref={setCardRef(2)} style={{ minHeight: 320, padding: 0, overflow: 'hidden' }}>
+            <div className="fn-card-header" style={{ padding: '12px 20px' }}>
+              <span className="fn-card-title">Building Map</span>
+              <span className="fn-card-badge" style={{ background: 'rgba(255,176,32,0.15)', color: '#FFB020' }}>TACTICAL</span>
+            </div>
+            <div style={{ flex: 1, minHeight: 260 }}>
+              <BuildingMap incident={activeIncident} evacPath={evacPath} />
+            </div>
+          </div>
+
+          {/* Sensor Panel */}
+          <div className="fn-card" ref={setCardRef(3)}>
+            <div className="fn-card-header">
+              <span className="fn-card-title">Sensor Array</span>
+              <span className="fn-card-badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#22C55E' }}>NOMINAL</span>
+            </div>
             <SensorPanel />
           </div>
-        </div>
 
-        {/* CENTER COLUMN: VCS Gauge + Action Panel */}
-        <div style={styles.centerCol}>
-          <div style={styles.panel}>
-            <ConfidenceGauge
-              vcs={activeIncident?.vcs || 0}
-              uiColor={uiColor}
-            />
-          </div>
-          <div style={{ ...styles.panel, flex: 1, overflow: 'auto', padding: '0.5rem' }}>
+          {/* Action Panel */}
+          <div className="fn-card" ref={setCardRef(4)} style={{ overflow: 'auto' }}>
+            <div className="fn-card-header">
+              <span className="fn-card-title">Response Actions</span>
+              <span className="fn-card-badge" style={{ background: 'rgba(255,59,31,0.15)', color: '#FF3B1F' }}>GEMINI AI</span>
+            </div>
             <ActionPanel
               geminiPlan={activeIncident?.geminiPlan || null}
               incidentId={activeIncident?.id}
               backendUrl={backendUrl}
             />
           </div>
-        </div>
 
-        {/* RIGHT COLUMN: Map + Missing Persons */}
-        <div style={styles.rightCol}>
-          <div style={{ ...styles.panel, flex: 1, padding: 0, overflow: 'hidden', minHeight: '300px' }}>
-            <BuildingMap
-              incident={activeIncident}
-              evacPath={evacPath}
-            />
-          </div>
-          <div style={{ ...styles.panel, maxHeight: '300px', overflow: 'auto' }}>
+          {/* Missing Persons */}
+          <div className="fn-card" ref={setCardRef(5)} style={{ overflow: 'auto', maxHeight: 400 }}>
+            <div className="fn-card-header">
+              <span className="fn-card-title">Missing Persons</span>
+              <span className="fn-card-badge" style={{ background: 'rgba(255,59,31,0.15)', color: '#FF3B1F' }}>TRACKING</span>
+            </div>
             <MissingPersonsBoard propertyId="hotel-a" />
           </div>
         </div>
-      </div>
 
-      {/* ═══ BOTTOM ROW: Audit Log + Demo Controls ═══ */}
-      <div style={styles.bottomRow}>
-        {/* Audit Trail */}
-        <div style={styles.auditPanel}>
-          <div style={styles.auditHeader}>Audit Trail</div>
-          <div style={styles.auditScroll}>
-            {auditLog.length === 0 && (
-              <div style={{ color: '#64748b', fontStyle: 'italic', padding: '0.5rem' }}>
-                No events yet. Use demo controls to start.
-              </div>
-            )}
-            {auditLog.map((log, i) => (
-              <div key={i} style={styles.auditItem}>
-                <span style={{ color: '#64748b', fontSize: '0.75rem', marginRight: '0.5rem' }}>{log.time}</span>
-                {log.text}
-              </div>
-            ))}
+        {/* ═══ BOTTOM: Audit + Demo ═══ */}
+        <div className="fn-bottom-row">
+          <div className="fn-audit-panel">
+            <div className="fn-audit-header">Audit Trail</div>
+            <div className="fn-audit-scroll">
+              {auditLog.length === 0 && (
+                <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  No events yet. Use demo controls to start.
+                </div>
+              )}
+              {auditLog.map((log, i) => (
+                <div key={i} className="fn-audit-item">
+                  <span className="fn-audit-time">{log.time}</span>
+                  {log.text}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="fn-demo-bar">
+            <div className="fn-demo-label">🎮 DEMO CONTROLS</div>
+            <div className="fn-demo-buttons">
+              <button className="fn-demo-btn" disabled={loadingDemo === 'smoke'}
+                onClick={() => triggerSignal('smoke', {
+                  type: 'IOT_SMOKE', zone: 'kitchen', floor: 1, room: 'kitchen', raw_confidence: 0.85, propertyId: 'hotel-a'
+                })}>
+                {loadingDemo === 'smoke' ? <span className="fn-demo-spinner" /> : '🔥'} Smoke
+              </button>
+              <button className="fn-demo-btn" disabled={loadingDemo === 'crowd'}
+                onClick={() => triggerSignal('crowd', {
+                  type: 'VISION_CROWD', zone: 'lobby', floor: 1, room: 'lobby', raw_confidence: 0.75, propertyId: 'hotel-a'
+                })}>
+                {loadingDemo === 'crowd' ? <span className="fn-demo-spinner" /> : '👥'} Crowd
+              </button>
+              <button className="fn-demo-btn" disabled={loadingDemo === 'sos'}
+                onClick={() => triggerSignal('sos', {
+                  type: 'GUEST_SOS', zone: 'lobby', floor: 1, room: 'room201', raw_confidence: 1.0, propertyId: 'hotel-a'
+                })}>
+                {loadingDemo === 'sos' ? <span className="fn-demo-spinner" /> : '🆘'} SOS
+              </button>
+              <button className="fn-demo-btn danger" disabled={loadingDemo === 'p1'}
+                onClick={() => triggerSignal('p1', {
+                  type: 'VISION_FALL', zone: 'lobby', floor: 1, room: 'lobby', raw_confidence: 0.9, propertyId: 'hotel-a'
+                }, true)}>
+                {loadingDemo === 'p1' ? <span className="fn-demo-spinner" /> : '⚡'} TRIGGER P1
+              </button>
+            </div>
           </div>
         </div>
-
-        {/* Demo Controls */}
-        <div style={styles.demoBar}>
-          <div style={styles.demoLabel}>🎮 DEMO CONTROLS</div>
-          <div style={styles.demoButtons}>
-            <button style={styles.demoBtn} disabled={loadingDemo === 'smoke'}
-              onClick={() => triggerSignal('smoke', {
-                type: 'IOT_SMOKE', zone: 'kitchen', floor: 1, room: 'kitchen', raw_confidence: 0.85, propertyId: 'hotel-a'
-              })}>
-              {loadingDemo === 'smoke' ? <span className="demo-spinner" /> : '🔥'} Smoke
-            </button>
-            <button style={styles.demoBtn} disabled={loadingDemo === 'crowd'}
-              onClick={() => triggerSignal('crowd', {
-                type: 'VISION_CROWD', zone: 'lobby', floor: 1, room: 'lobby', raw_confidence: 0.75, propertyId: 'hotel-a'
-              })}>
-              {loadingDemo === 'crowd' ? <span className="demo-spinner" /> : '👥'} Crowd
-            </button>
-            <button style={styles.demoBtn} disabled={loadingDemo === 'sos'}
-              onClick={() => triggerSignal('sos', {
-                type: 'GUEST_SOS', zone: 'lobby', floor: 1, room: 'room201', raw_confidence: 1.0, propertyId: 'hotel-a'
-              })}>
-              {loadingDemo === 'sos' ? <span className="demo-spinner" /> : '🆘'} SOS
-            </button>
-            <button style={{ ...styles.demoBtn, background: '#dc2626', border: '2px solid #7f1d1d' }}
-              disabled={loadingDemo === 'p1'}
-              onClick={() => triggerSignal('p1', {
-                type: 'VISION_FALL', zone: 'lobby', floor: 1, room: 'lobby', raw_confidence: 0.9, propertyId: 'hotel-a'
-              }, true)}>
-              {loadingDemo === 'p1' ? <span className="demo-spinner" /> : '⚡'} TRIGGER P1
-            </button>
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }
-
-const styles = {
-  dashboard: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100vh',
-    background: '#0a0f1e',
-    color: '#f8fafc',
-    fontFamily: "'Inter', sans-serif",
-    overflow: 'hidden',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '0.75rem 1.5rem',
-    background: 'rgba(15, 23, 42, 0.9)',
-    borderBottom: '2px solid #3b82f6',
-    flexShrink: 0,
-  },
-  headerTitle: { margin: 0, fontSize: '1.3rem', fontWeight: 900 },
-  headerSub: { fontSize: '0.8rem', color: '#94a3b8' },
-  incidentCounter: { fontSize: '0.85rem', color: '#94a3b8' },
-  statusPill: {
-    padding: '0.4rem 1.2rem',
-    borderRadius: '999px',
-    fontWeight: 800,
-    letterSpacing: '1px',
-    textTransform: 'uppercase',
-    color: '#fff',
-    fontSize: '0.85rem',
-  },
-  mainGrid: {
-    display: 'grid',
-    gridTemplateColumns: '28% 28% 1fr',
-    gap: '1rem',
-    flex: 1,
-    padding: '1rem',
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-  leftCol: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-    minHeight: 0,
-    overflow: 'auto',
-  },
-  centerCol: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-  rightCol: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-  panel: {
-    background: 'rgba(30, 41, 59, 0.6)',
-    border: '1px solid rgba(255,255,255,0.07)',
-    borderRadius: '12px',
-    padding: '1rem',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  bottomRow: {
-    display: 'flex',
-    gap: '1rem',
-    padding: '0 1rem 0.75rem 1rem',
-    flexShrink: 0,
-    maxHeight: '140px',
-  },
-  auditPanel: {
-    flex: 1,
-    background: 'rgba(30, 41, 59, 0.5)',
-    border: '1px solid rgba(255,255,255,0.07)',
-    borderRadius: '10px',
-    overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  auditHeader: {
-    padding: '0.4rem 0.75rem',
-    background: 'rgba(0,0,0,0.3)',
-    fontSize: '0.8rem',
-    fontWeight: 'bold',
-    color: '#94a3b8',
-    textTransform: 'uppercase',
-    letterSpacing: '1px',
-  },
-  auditScroll: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '0.4rem 0.75rem',
-    fontSize: '0.8rem',
-  },
-  auditItem: {
-    padding: '0.2rem 0',
-    borderBottom: '1px solid rgba(255,255,255,0.03)',
-  },
-  demoBar: {
-    background: '#fde047',
-    color: '#000',
-    padding: '0.75rem',
-    borderRadius: '10px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.5rem',
-    minWidth: '380px',
-  },
-  demoLabel: {
-    fontWeight: 900,
-    fontSize: '0.85rem',
-    textTransform: 'uppercase',
-  },
-  demoButtons: {
-    display: 'flex',
-    gap: '0.5rem',
-    flexWrap: 'wrap',
-  },
-  demoBtn: {
-    background: '#1e293b',
-    color: '#fff',
-    border: 'none',
-    padding: '0.5rem 0.8rem',
-    borderRadius: '6px',
-    fontWeight: 'bold',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.3rem',
-    fontSize: '0.8rem',
-    transition: 'transform 0.1s',
-  },
-};
